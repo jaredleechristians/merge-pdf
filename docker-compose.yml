@@ -1,0 +1,19 @@
+version: "3.9"
+
+services:
+  web:
+    build: .
+    container_name: pdfmerge-web
+    ports:
+      - "8080:80"
+    volumes:
+      - ./html:/var/www/html
+    environment:
+      - GOTENBERG_URL=https://gotenberg.robotweb.dev
+    command: >
+      bash -c "
+      apt-get update &&
+      apt-get install -y libcurl4-openssl-dev &&
+      docker-php-ext-install curl &&
+      apache2-foreground
+      "

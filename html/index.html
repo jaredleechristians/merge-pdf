@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>PDF Merger</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f7fb;
+      margin: 0;
+      padding: 40px;
+      color: #1f2937;
+    }
+
+    .container {
+      max-width: 760px;
+      margin: auto;
+      background: #fff;
+      padding: 30px;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+    }
+
+    h1 {
+      margin-top: 0;
+    }
+
+    input[type="file"] {
+      display: block;
+      margin: 20px 0;
+    }
+
+    button,
+    a.download {
+      display: inline-block;
+      padding: 12px 18px;
+      border-radius: 10px;
+      border: none;
+      background: #2563eb;
+      color: white;
+      font-weight: bold;
+      cursor: pointer;
+      text-decoration: none;
+      margin-right: 10px;
+    }
+
+    button:disabled,
+    a.download.disabled {
+      background: #9ca3af;
+      pointer-events: none;
+      cursor: not-allowed;
+      opacity: 0.65;
+    }
+
+    .stats {
+      display: flex;
+      gap: 12px;
+      margin: 20px 0;
+    }
+
+    .stat {
+      flex: 1;
+      background: #f9fafb;
+      padding: 15px;
+      border-radius: 12px;
+      border: 1px solid #e5e7eb;
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 28px;
+      margin-top: 5px;
+    }
+
+    .files {
+      margin: 20px 0;
+      border-top: 1px solid #e5e7eb;
+    }
+
+    .file {
+      padding: 10px;
+      border-bottom: 1px solid #e5e7eb;
+      font-size: 14px;
+    }
+
+    .message {
+      margin-top: 20px;
+      font-weight: bold;
+      white-space: pre-wrap;
+    }
+
+    .error {
+      color: #b91c1c;
+    }
+
+    .success {
+      color: #047857;
+    }
+
+    code {
+      background: #f3f4f6;
+      padding: 2px 5px;
+      border-radius: 5px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+    <h1>Merge PDF Files</h1>
+    <p>Select two or more PDFs. Files are sent to <code>merge.php</code>, which sends them to Gotenberg.</p>
+
+    <input id="fileInput" type="file" accept="application/pdf,.pdf" multiple>
+
+    <div class="stats">
+      <div class="stat">
+        Files selected
+        <strong id="filesSelected">0</strong>
+      </div>
+      <div class="stat">
+        Files merged
+        <strong id="filesMerged">0</strong>
+      </div>
+      <div class="stat">
+        Total pages
+        <strong id="totalPages">0</strong>
+      </div>
+    </div>
+
+    <div id="fileList" class="files"></div>
+
+    <button id="mergeBtn" type="button" disabled>Merge PDFs</button>
+    <button id="clearBtn" type="button">Clear</button>
+
+    <a id="downloadLink"
+       class="download disabled"
+       href="#"
+       download="merged.pdf"
+       aria-disabled="true">
+      Download merged PDF
+    </a>
+
+    <div id="message" class="message"></div>
+  </div>
+
+  <script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const fileList = document.getElementById('fileList');
+    const mergeBtn = document.getElementById('mergeBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const downloadLink = document.getElementById('downloadLink');
+    const message = document.getElementById('message');
+
+    const filesSelected = document.getElementById('filesSelected');
+    const filesMerged = document.getElementById('filesMerged');
+    const totalPages = document.getElementById('totalPages');
+
+    let selectedFiles = [];
+    let pageCounts = [];
+    let mergedUrl = null;
+
+    function setMessage(text, type = '') {
+      message.textContent = text || '';
+      message.className = 'message ' + type;
+    }
+
+    function disableDownload() {
+      if (mergedUrl) {
+        URL.revokeObjectURL(mergedUrl);
+      }
+
+      mergedUrl = null;
+      downloadLink.href = '#';
+      downloadLink.classList.add('disabled');
+      downloadLink.setAttribute('aria-disabled', 'true');
+    }
+
+    function enableDownload(blob) {
+      disableDownload();
+
+      mergedUrl = URL.createObjectURL(blob);
+      downloadLink.href = mergedUrl;
+      downloadLink.download = 'merged.pdf';
+      downloadLink.classList.remove('disabled');
+      downloadLink.removeAttribute('aria-disabled');
+    }
+
+    async function countPdfPages(file) {
+      const buffer = await file.arrayBuffer();
+
+      const pdf = await PDFLib.PDFDocument.load(buffer, {
+        ignoreEncryption: true
+      });
+
+      return pdf.getPageCount();
+    }
+
+    async function handleFiles(files) {
+      disableDownload();
+
+      selectedFiles = Array.from(files).filter(file => {
+        return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+      });
+
+      pageCounts = [];
+      filesMerged.textContent = '0';
+
+      if (selectedFiles.length === 0) {
+        renderFiles();
+        setMessage('Please select PDF files.', 'error');
+        return;
+      }
+
+      renderFiles();
+      setMessage('Counting pages...');
+
+      for (const file of selectedFiles) {
+        try {
+          const pages = await countPdfPages(file);
+          pageCounts.push(pages);
+        } catch (error) {
+          pageCounts.push(0);
+        }
+
+        renderFiles();
+      }
+
+      if (selectedFiles.length < 2) {
+        setMessage('Please select at least two PDF files.', 'error');
+      } else {
+        setMessage('Ready to merge.', 'success');
+      }
+    }
+
+    function renderFiles() {
+      filesSelected.textContent = selectedFiles.length;
+
+      const pagesTotal = pageCounts.reduce((sum, pages) => sum + pages, 0);
+      totalPages.textContent = pagesTotal;
+
+      mergeBtn.disabled = selectedFiles.length < 2;
+
+      fileList.innerHTML = '';
+
+      selectedFiles.forEach((file, index) => {
+        const row = document.createElement('div');
+        row.className = 'file';
+
+        const pages = pageCounts[index] ?? 'counting...';
+        row.textContent = `${index + 1}. ${file.name} — ${pages} page(s)`;
+
+        fileList.appendChild(row);
+      });
+    }
+
+    async function mergePdfs() {
+      disableDownload();
+
+      if (selectedFiles.length < 2) {
+        setMessage('Please select at least two PDF files.', 'error');
+        return;
+      }
+
+      const formData = new FormData();
+
+      selectedFiles.forEach(file => {
+        formData.append('files[]', file, file.name);
+      });
+
+      mergeBtn.disabled = true;
+      setMessage('Merging PDFs...');
+
+      try {
+        const response = await fetch('./merge.php', {
+          method: 'POST',
+          body: formData
+        });
+
+        const contentType = response.headers.get('content-type') || '';
+
+        if (!response.ok) {
+          const errorText = await response.text();
+
+          if (response.status === 404) {
+            throw new Error('merge.php was not found. Make sure index.html and merge.php are in the same folder.');
+          }
+
+          throw new Error(errorText || `Server error ${response.status}`);
+        }
+
+        if (!contentType.includes('application/pdf')) {
+          const text = await response.text();
+          throw new Error('Server did not return a PDF.\n\n' + text);
+        }
+
+        const blob = await response.blob();
+
+        if (!blob || blob.size < 1000) {
+          throw new Error('The returned PDF is too small and may be invalid.');
+        }
+
+        enableDownload(blob);
+
+        filesMerged.textContent = selectedFiles.length;
+        totalPages.textContent = pageCounts.reduce((sum, pages) => sum + pages, 0);
+
+        setMessage(
+          `Merged ${selectedFiles.length} file(s) with ${totalPages.textContent} total page(s).`,
+          'success'
+        );
+
+      } catch (error) {
+        console.error(error);
+        disableDownload();
+        filesMerged.textContent = '0';
+        setMessage('Merge failed.\n\n' + error.message, 'error');
+      } finally {
+        mergeBtn.disabled = selectedFiles.length < 2;
+      }
+    }
+
+    function clearAll() {
+      selectedFiles = [];
+      pageCounts = [];
+      fileInput.value = '';
+      filesSelected.textContent = '0';
+      filesMerged.textContent = '0';
+      totalPages.textContent = '0';
+      fileList.innerHTML = '';
+      disableDownload();
+      setMessage('');
+      mergeBtn.disabled = true;
+    }
+
+    fileInput.addEventListener('change', event => {
+      handleFiles(event.target.files);
+    });
+
+    mergeBtn.addEventListener('click', mergePdfs);
+    clearBtn.addEventListener('click', clearAll);
+
+    disableDownload();
+  </script>
+</body>
+</html>
